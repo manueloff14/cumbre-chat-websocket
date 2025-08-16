@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Flask</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #messages { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Conexión WebSocket con Flask</h1>
+    
+    <input type="text" id="messageInput" placeholder="Escribe un mensaje" />
+    <button id="sendMessageButton">Enviar mensaje</button>
+    
+    <div id="messages">
+        <h2>Mensajes:</h2>
+        <div id="messageList"></div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    <script>
+        var socket = io();  // Establecer conexión con el servidor WebSocket
+
+        // Evento para manejar el mensaje enviado desde el servidor
+        socket.on('message', function(msg) {
+            const messageList = document.getElementById("messageList");
+            const messageElement = document.createElement("p");
+            messageElement.textContent = "Servidor: " + msg;
+            messageList.appendChild(messageElement);
+        });
+
+        // Enviar un mensaje al servidor cuando el botón sea presionado
+        document.getElementById("sendMessageButton").onclick = function() {
+            const message = document.getElementById("messageInput").value;
+            if (message) {
+                socket.send(message);  // Enviar el mensaje al servidor
+                const messageList = document.getElementById("messageList");
+                const messageElement = document.createElement("p");
+                messageElement.textContent = "Cliente: " + message;
+                messageList.appendChild(messageElement);
+                document.getElementById("messageInput").value = "";  // Limpiar el campo de entrada
+            }
+        };
+    </script>
+</body>
+</html>

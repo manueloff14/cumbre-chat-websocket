@@ -1,0 +1,11 @@
+# Archivos de entorno
+.env
+.env.local
+
+# Cache de Python
+__pycache__/
+*.pyc
+
+# Carpetas de entorno virtual (si usas una)
+venv/
+.venv/

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat con Sonia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* Estilos de Tablas y Animación */
+        .assistant-message table { width: 100%; border-collapse: collapse; margin-top: 1rem; margin-bottom: 1rem; font-size: 0.9em; box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1); }
+        .assistant-message th, .assistant-message td { padding: 10px 12px; border: 1px solid #e2e8f0; text-align: left; }
+        .assistant-message th { background-color: #f8fafc; font-weight: 600; }
+        .typing-bubble { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 50% { opacity: .5; } }
+
+        /* Estilos para Fuentes Rápidas y Completas */
+        .quick-sources-container { font-size: 0.8em; color: #64748b; background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; border-radius: 0.5rem; margin-bottom: 0.5rem; animation: fadeIn 0.5s ease-out; }
+        .sources-content { max-height: 0; overflow: hidden; transition: max-height 0.5s ease-in-out; background-color: #f8fafc; border-top: 1px solid #e2e8f0; }
+        .sources-content.expanded { max-height: 400px; overflow-y: auto; }
+        .sources-content pre { white-space: pre-wrap; word-wrap: break-word; padding: 0.75rem; font-size: 0.8em; color: #334155; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+
+<body class="bg-gray-100 flex flex-col h-full">
+    <div class="flex flex-col h-full max-w-3xl mx-auto w-full bg-white shadow-lg">
+        <header class="bg-blue-600 text-white p-4 text-center shadow-md">
+            <h1 class="text-xl font-bold">Asistente de Empleo Sonia</h1>
+        </header>
+
+        <main id="chat-window" class="flex-1 p-6 overflow-y-auto space-y-4">
+            <div class="message assistant-message flex justify-start">
+                <div class="bg-gray-200 text-gray-800 rounded-lg py-2 px-4 max-w-lg shadow-md">
+                    ¡Hola! Soy Sonia. ¿Qué tipo de empleo estás buscando hoy?
+                </div>
+            </div>
+            <div id="sources-wrapper"></div>
+        </main>
+
+        <div id="status-indicator" class="px-6 py-2 text-sm text-gray-500 italic h-8 transition-opacity"></div>
+
+        <footer class="p-4 bg-gray-50 border-t">
+            <form id="chat-form" class="flex items-center">
+                <input type="text" id="message-input" placeholder="Busco un empleo de..." class="flex-1 p-2 border rounded-l-md focus:ring-2 focus:ring-blue-500 focus:outline-none transition" autocomplete="off">
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-r-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed">Enviar</button>
+            </form>
+        </footer>
+    </div>
+
+    <script>
+        const socket = io("https://prepared-sc-boost-seen.trycloudflare.com");
+        const chatWindow = document.getElementById('chat-window');
+        const chatForm = document.getElementById('chat-form');
+        const messageInput = document.getElementById('message-input');
+        const statusIndicator = document.getElementById('status-indicator');
+        const sourcesWrapper = document.getElementById('sources-wrapper');
+
+        let currentAssistantBubble = null;
+        let lastApiSources = [];
+        let currentAssistantContent = "";
+
+        chatForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            const message = messageInput.value.trim();
+            if (message) {
+                lastApiSources = [];
+                sourcesWrapper.innerHTML = '';
+                appendMessage(message, 'user');
+                socket.emit('user_message', { 'message': message });
+                messageInput.value = '';
+                toggleForm(false);
+            }
+        });
+
+        socket.on('status_update', (data) => statusIndicator.textContent = data.step === 'done' ? '' : data.message);
+
+        socket.on('assistant_token', function (data) {
+            if (!currentAssistantBubble) {
+                currentAssistantBubble = appendMessage("", 'assistant');
+                currentAssistantBubble.classList.add('typing-bubble');
+            }
+            currentAssistantContent += data.token;
+            currentAssistantBubble.innerHTML = marked.parse(currentAssistantContent);
+            scrollToBottom();
+        });
+        
+        socket.on('assistant_response_end', function (data) {
+            if (currentAssistantBubble) {
+                currentAssistantBubble.classList.remove('typing-bubble');
+            }
+            if (lastApiSources.length > 0) {
+                appendFullSources(lastApiSources);
+            }
+            currentAssistantBubble = null;
+            currentAssistantContent = "";
+            statusIndicator.textContent = '';
+            toggleForm(true);
+        });
+
+        socket.on('api_search_result', function (data) {
+            console.log('📦 Fuente recibida:', data);
+            lastApiSources.push(data);
+            updateQuickSourcesPreview();
+        });
+
+        socket.on('error_message', function (data) {
+            showError(data.message);
+            currentAssistantBubble = null;
+            currentAssistantContent = "";
+            lastApiSources = [];
+            sourcesWrapper.innerHTML = '';
+            toggleForm(true);
+        });
+
+        function updateQuickSourcesPreview() {
+            sourcesWrapper.innerHTML = '';
+            if (lastApiSources.length === 0) return;
+            const container = document.createElement('div');
+            container.className = 'quick-sources-container max-w-lg';
+            let content = '<div class="font-semibold mb-1 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>Buscando en fuentes...</div><ul class="list-disc pl-5">';
+            lastApiSources.slice(0, 3).forEach(source => {
+                // V-- LÍNEA CORREGIDA 1 --V
+                const resultCount = source.vacancies ? source.vacancies.length : 0;
+                content += `<li><strong>"${source.query}"</strong>: ${resultCount} resultados</li>`;
+            });
+            content += '</ul>';
+            container.innerHTML = content;
+            sourcesWrapper.appendChild(container);
+            scrollToBottom();
+        }
+
+        function appendFullSources(sources) {
+            // V-- LÍNEA CORREGIDA 2 --V
+            const totalResults = sources.reduce((acc, s) => acc + (s.vacancies ? s.vacancies.length : 0), 0);
+            if (totalResults === 0) {
+                sourcesWrapper.innerHTML = '';
+                return;
+            }
+            const sourcesBox = document.createElement('div');
+            sourcesBox.className = 'border rounded-md w-full max-w-lg bg-white shadow-sm overflow-hidden mt-2';
+            const toggleButton = document.createElement('button');
+            toggleButton.className = 'w-full text-left p-2 text-sm font-medium text-gray-600 hover:bg-gray-50 flex items-center justify-between';
+            toggleButton.innerHTML = `<span class="flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4M4 7l8 5 8-5" /></svg>Ver Fuentes Completas de la Búsqueda</span><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transform transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>`;
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'sources-content';
+            sources.forEach(source => {
+                const queryHeader = document.createElement('div');
+                queryHeader.className = 'p-2 bg-gray-100 font-semibold text-xs border-y';
+                queryHeader.textContent = `Resultados para: "${source.query}"`;
+                contentDiv.appendChild(queryHeader);
+                const pre = document.createElement('pre');
+                const code = document.createElement('code');
+                // V-- LÍNEA CORREGIDA 3 (Mejora) --V
+                const resultsOnly = { ...source };
+                delete resultsOnly.query; // Quita la clave 'query' para no mostrarla dos veces
+                code.textContent = JSON.stringify(resultsOnly, null, 2);
+                pre.appendChild(code);
+                contentDiv.appendChild(pre);
+            });
+            toggleButton.addEventListener('click', () => {
+                contentDiv.classList.toggle('expanded');
+                toggleButton.querySelector('svg:last-child').classList.toggle('rotate-180');
+                if (contentDiv.classList.contains('expanded')) {
+                    setTimeout(() => scrollToBottom(), 500);
+                }
+            });
+            sourcesBox.appendChild(toggleButton);
+            sourcesBox.appendChild(contentDiv);
+            sourcesWrapper.innerHTML = '';
+            sourcesWrapper.appendChild(sourcesBox);
+            scrollToBottom();
+        }
+
+        function appendMessage(content, type) {
+            const messageWrapper = document.createElement('div');
+            messageWrapper.classList.add('message', `${type}-message`, 'flex');
+            const messageBubble = document.createElement('div');
+            messageBubble.classList.add('rounded-lg', 'py-2', 'px-4', 'max-w-lg', 'shadow-md');
+            if (type === 'user') {
+                messageWrapper.classList.add('justify-end');
+                messageBubble.classList.add('bg-blue-600', 'text-white');
+                messageBubble.textContent = content;
+            } else {
+                chatWindow.appendChild(sourcesWrapper);
+                messageWrapper.classList.add('justify-start');
+                messageBubble.classList.add('bg-gray-200', 'text-gray-800');
+                messageBubble.innerHTML = marked.parse(content);
+            }
+            messageWrapper.appendChild(messageBubble);
+            chatWindow.appendChild(messageWrapper);
+            scrollToBottom();
+            return messageBubble;
+        }
+        
+        function showError(message) {
+            const errorWrapper = document.createElement('div');
+            errorWrapper.classList.add('message', 'flex', 'justify-start');
+            const errorBubble = document.createElement('div');
+            errorBubble.classList.add('bg-red-100', 'text-red-700', 'rounded-lg', 'py-2', 'px-4', 'max-w-lg', 'shadow-md');
+            errorBubble.textContent = `🚨 Error: ${message}`;
+            errorWrapper.appendChild(errorWrapper);
+            chatWindow.appendChild(errorBubble);
+            scrollToBottom();
+        }
+
+        function toggleForm(enabled) {
+            messageInput.disabled = !enabled;
+            chatForm.querySelector('button').disabled = !enabled;
+            if (enabled) {
+                messageInput.focus();
+            }
+        }
+
+        function scrollToBottom() {
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+    </script>
+</body>
+</html>
