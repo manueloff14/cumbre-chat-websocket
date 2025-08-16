@@ -1,5 +1,6 @@
 Flask
 Flask-SocketIO
-requests
 groq
 gunicorn
+requests
+eventlet  # <-- ¡Añade esta línea!
