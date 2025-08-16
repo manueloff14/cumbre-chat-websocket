@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 # -*- coding: utf-8 -*-
 """
 Sonia - Asistente de Búsqueda de Empleo v11.0
